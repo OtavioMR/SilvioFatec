@@ -104,7 +104,7 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "${{ steps.deploy.outputs.target_url }}/api/health"
           if [ -n "${SERVER_PID:-}" ]; then kill $SERVER_PID || true; fi
       - name: Comenta a URL no PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             github.rest.issues.createComment({
