@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+.vercel/
+public/build-info.json
+.env*

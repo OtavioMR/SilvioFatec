@@ -1,0 +1,123 @@
+# =============================================================================
+# PIPELINE PRINCIPAL: CI (build + testes) -> CD (deploy na Vercel)
+#   • Pull Request -> deploy de PREVIEW (URL temporária comentada no PR)
+#   • Push na main -> deploy de PRODUÇÃO (com aprovação manual opcional)
+#
+# Segredos necessários (Settings > Secrets and variables > Actions):
+#   VERCEL_TOKEN        token criado em vercel.com/account/tokens
+#   VERCEL_ORG_ID       está em .vercel/project.json após `vercel link`
+#   VERCEL_PROJECT_ID   idem
+# =============================================================================
+name: Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deploys da mesma branch entram em fila (não cancelamos deploy no meio!)
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  # ------------------------------------------- Espera o CI passar antes de publicar
+  # Reaproveita as mesmas verificações chamando o workflow CI.
+  checks:
+    name: Rodar CI antes do deploy
+    uses: ./.github/workflows/ci.yml
+
+  # ----------------------------------------------------------------- PREVIEW (PR)
+  preview:
+    name: Deploy Preview
+    # PRs vindos de forks não recebem segredos, então não dá para fazer deploy
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write        # para comentar a URL no PR
+    environment:
+      name: preview
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Instala a CLI da Vercel
+        run: npm install --global vercel@latest
+      - name: Baixa configuração do projeto (preview)
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Pipeline
+        id: deploy
+        run: |
+          URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### 🔍 Preview: $URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test no preview
+        run: |
+          sleep 5
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 "${{ steps.deploy.outputs.url }}/api/health"
+      - name: Comenta a URL no PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 **Preview pronto!**\n\n${{ steps.deploy.outputs.url }}\n\nCommit: \`${context.sha.slice(0, 7)}\``
+            })
+
+  # ------------------------------------------------------------ PRODUÇÃO (main)
+  production:
+    name: Deploy Produção
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Se o environment "production" tiver "Required reviewers",
+    # o job pausa aqui até alguém aprovar no GitHub.
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Instala a CLI da Vercel
+        run: npm install --global vercel@latest
+      - name: Baixa configuração do projeto (produção)
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Pipeline
+        id: deploy
+        run: |
+          URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### 🚀 Produção: $URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test pós-deploy
+        run: |
+          sleep 5
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 "${{ steps.deploy.outputs.url }}/api/health"
+          curl --fail --silent --show-error "${{ steps.deploy.outputs.url }}/api/hello?name=Deploy" | grep "Olá, Deploy!"

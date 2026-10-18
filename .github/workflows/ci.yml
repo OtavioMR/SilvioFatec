@@ -1,0 +1,169 @@
+# =============================================================================
+# CI — Integração Contínua (workflow reutilizável)
+# Não roda sozinho em PR/push: é chamado pelo pipeline.yml, que decide
+# o que fazer depois (deploy). Também pode ser rodado à mão (workflow_dispatch).
+# Fluxo:  lint ─┬─> unit (matriz) ─┬─> coverage ─> build ─┐
+#               └─> integration ───┘                      ├─> ci-ok
+#                                  performance ───────────┘
+# =============================================================================
+name: CI
+
+on:
+  workflow_call:            # chamado pelo pipeline.yml
+  workflow_dispatch:        # permite rodar manualmente pela aba Actions
+
+# Cancela execuções antigas da mesma branch quando chega um commit novo
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Princípio do menor privilégio: só leitura por padrão
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  # ---------------------------------------------------------------- 1. LINT
+  lint:
+    name: Lint (qualidade de código)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm                       # cache das dependências
+      - run: npm ci
+      - run: npm run lint
+
+  # ------------------------------------------------------- 2. TESTES UNITÁRIOS
+  unit:
+    name: Unit (Node ${{ matrix.node }})
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false                     # não cancela as outras versões se uma falhar
+      matrix:
+        node: [22, 24]                     # testa em várias versões do Node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  # ----------------------------------------------------- 3. TESTES DE INTEGRAÇÃO
+  integration:
+    name: Integração (API)
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+
+  # ------------------------------------------------------------ 4. COBERTURA
+  coverage:
+    name: Cobertura de testes
+    needs: [unit, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # Falha se cobertura < limites definidos no package.json
+      - name: Roda testes com cobertura
+        shell: bash                        # bash com pipefail: falha do teste não é escondida pelo tee
+        run: npm run test:coverage 2>&1 | tee coverage.txt
+      - name: Resumo no painel do GitHub
+        if: always()
+        run: |
+          echo "## 🧪 Cobertura de testes" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          sed -n '/^---/,$p' coverage.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # ------------------------------------------------------------ 5. PERFORMANCE
+  performance:
+    name: Performance (teste de carga)
+    needs: [unit, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Teste de carga (autocannon)
+        shell: bash
+        run: npm run test:perf | tee perf-result.txt
+      - name: Resumo no painel do GitHub
+        if: always()
+        run: |
+          echo "## ⚡ Performance" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat perf-result.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ----------------------------------------------------------------- 6. BUILD
+  build:
+    name: Build
+    needs: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Valida o resultado do build
+        run: |
+          test -f public/index.html
+          test -f public/build-info.json
+          cat public/build-info.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-build
+          path: public/
+          retention-days: 7
+
+  # ------------------------------------------- 7. PORTÃO ÚNICO PARA BRANCH PROTECTION
+  # Configure SÓ este job como "required" na proteção da branch main.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [lint, unit, integration, coverage, performance, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifica se todos os jobs passaram
+        run: |
+          echo "Resultado: ${{ join(needs.*.result, ', ') }}"
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "❌ Algum job falhou"; exit 1
+          fi
+          echo "✅ Tudo certo"
