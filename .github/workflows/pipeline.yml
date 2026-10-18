@@ -142,7 +142,10 @@ jobs:
         if: env.HAS_VERCEL_TOKEN == 'true'
         env:
           HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p .vercel
+          echo '{"projectId":"${{ secrets.VERCEL_PROJECT_ID }}","orgId":"${{ secrets.VERCEL_ORG_ID }}"}' > .vercel/project.json
+          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }} || true
       - name: Build
         env:
           HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
