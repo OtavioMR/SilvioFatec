@@ -59,21 +59,50 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Instala a CLI da Vercel
+        if: env.HAS_VERCEL_TOKEN == 'true'
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: npm install --global vercel@latest
       - name: Baixa configuração do projeto (preview)
+        if: env.HAS_VERCEL_TOKEN == 'true'
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
       - name: Build
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+        run: |
+          if [ "$HAS_VERCEL_TOKEN" = "true" ]; then
+            vercel build --token=${{ secrets.VERCEL_TOKEN }}
+          else
+            npm run build
+          fi
       - name: Pipeline
         id: deploy
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
-          URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          if [ "$HAS_VERCEL_TOKEN" = "true" ]; then
+            URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+            TARGET_URL="$URL"
+          else
+            URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            TARGET_URL="http://127.0.0.1:3000"
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "target_url=$TARGET_URL" >> "$GITHUB_OUTPUT"
           echo "### 🔍 Preview: $URL" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test no preview
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
-          sleep 5
-          curl --fail --silent --show-error --retry 5 --retry-delay 3 "${{ steps.deploy.outputs.url }}/api/health"
+          if [ "$HAS_VERCEL_TOKEN" != "true" ]; then
+            node scripts/dev-server.js &
+            SERVER_PID=$!
+          fi
+          sleep 3
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "${{ steps.deploy.outputs.target_url }}/api/health"
+          if [ -n "${SERVER_PID:-}" ]; then kill $SERVER_PID || true; fi
       - name: Comenta a URL no PR
         uses: actions/github-script@v7
         with:
@@ -105,19 +134,48 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Instala a CLI da Vercel
+        if: env.HAS_VERCEL_TOKEN == 'true'
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: npm install --global vercel@latest
       - name: Baixa configuração do projeto (produção)
+        if: env.HAS_VERCEL_TOKEN == 'true'
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
       - name: Build
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
+        run: |
+          if [ "$HAS_VERCEL_TOKEN" = "true" ]; then
+            vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          else
+            npm run build
+          fi
       - name: Pipeline
         id: deploy
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
-          URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          if [ "$HAS_VERCEL_TOKEN" = "true" ]; then
+            URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+            TARGET_URL="$URL"
+          else
+            URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            TARGET_URL="http://127.0.0.1:3000"
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "target_url=$TARGET_URL" >> "$GITHUB_OUTPUT"
           echo "### 🚀 Produção: $URL" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test pós-deploy
+        env:
+          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
-          sleep 5
-          curl --fail --silent --show-error --retry 5 --retry-delay 3 "${{ steps.deploy.outputs.url }}/api/health"
-          curl --fail --silent --show-error "${{ steps.deploy.outputs.url }}/api/hello?name=Deploy" | grep "Olá, Deploy!"
+          if [ "$HAS_VERCEL_TOKEN" != "true" ]; then
+            node scripts/dev-server.js &
+            SERVER_PID=$!
+          fi
+          sleep 3
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "${{ steps.deploy.outputs.target_url }}/api/health"
+          curl --fail --silent --show-error "${{ steps.deploy.outputs.target_url }}/api/hello?name=Deploy" | grep "Olá, Deploy!"
+          if [ -n "${SERVER_PID:-}" ]; then kill $SERVER_PID || true; fi
