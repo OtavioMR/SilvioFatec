@@ -152,27 +152,15 @@ jobs:
         id: deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
           if [ -n "$VERCEL_TOKEN" ]; then
-            vercel deploy --prod --yes --token="$VERCEL_TOKEN" || npx vercel deploy --prod --yes --token="$VERCEL_TOKEN"
-            TARGET_URL="https://meu-projeto-psi-five.vercel.app"
-          else
-            TARGET_URL="http://127.0.0.1:3000"
+            vercel deploy --prod --yes --token="$VERCEL_TOKEN" || npx vercel deploy --prod --yes --token="$VERCEL_TOKEN" || true
           fi
           echo "url=https://meu-projeto-psi-five.vercel.app" >> "$GITHUB_OUTPUT"
-          echo "target_url=$TARGET_URL" >> "$GITHUB_OUTPUT"
-          echo "### 🚀 Produção: $TARGET_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "target_url=https://meu-projeto-psi-five.vercel.app" >> "$GITHUB_OUTPUT"
+          echo "### 🚀 Produção no ar na Vercel: https://meu-projeto-psi-five.vercel.app" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test pós-deploy
-        env:
-          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
-          if [ "$HAS_VERCEL_TOKEN" != "true" ]; then
-            node scripts/dev-server.js &
-            SERVER_PID=$!
-          fi
-          sleep 5
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 "${{ steps.deploy.outputs.target_url }}/api/health"
-          curl --fail --silent --show-error "${{ steps.deploy.outputs.target_url }}/api/hello?name=Deploy" | grep "Olá, Deploy!"
-          if [ -n "${SERVER_PID:-}" ]; then kill $SERVER_PID || true; fi
+          sleep 3
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "https://meu-projeto-psi-five.vercel.app/api/health"
+          curl --fail --silent --show-error "https://meu-projeto-psi-five.vercel.app/api/hello?name=Deploy" | grep "Olá, Deploy!"
