@@ -78,3 +78,4 @@ if ($existingRemote) {
     Write-Host "`nℹ️ Quando criar o repositório no GitHub, basta rodar:" -ForegroundColor Cyan
     Write-Host "   .\automatizar.ps1 -RepoUrl 'https://github.com/SEU_USUARIO/SEU_REPO.git' -SkipTests true" -ForegroundColor White
 }
+
