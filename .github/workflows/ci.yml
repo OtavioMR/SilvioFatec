@@ -97,7 +97,7 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           sed -n '/^---/,$p' coverage.txt >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -146,7 +146,7 @@ jobs:
           test -f public/index.html
           test -f public/build-info.json
           cat public/build-info.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: site-build
           path: public/
