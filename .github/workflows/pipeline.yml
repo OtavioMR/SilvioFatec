@@ -147,29 +147,22 @@ jobs:
           echo '{"projectId":"${{ secrets.VERCEL_PROJECT_ID }}","orgId":"${{ secrets.VERCEL_ORG_ID }}"}' > .vercel/project.json
           vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }} || true
       - name: Build
-        env:
-          HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
-        run: |
-          if [ "$HAS_VERCEL_TOKEN" = "true" ]; then
-            vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-          else
-            npm run build
-          fi
+        run: npm run build
       - name: Pipeline
         id: deploy
         env:
           HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
         run: |
           if [ "$HAS_VERCEL_TOKEN" = "true" ]; then
-            URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
-            TARGET_URL="$URL"
+            URL=$(vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }} --yes)
+            TARGET_URL="https://meu-projeto-psi-five.vercel.app"
           else
             URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             TARGET_URL="http://127.0.0.1:3000"
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "target_url=$TARGET_URL" >> "$GITHUB_OUTPUT"
-          echo "### 🚀 Produção: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🚀 Produção: $TARGET_URL" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test pós-deploy
         env:
           HAS_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN != '' }}
@@ -178,7 +171,7 @@ jobs:
             node scripts/dev-server.js &
             SERVER_PID=$!
           fi
-          sleep 3
+          sleep 5
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "${{ steps.deploy.outputs.target_url }}/api/health"
           curl --fail --silent --show-error "${{ steps.deploy.outputs.target_url }}/api/hello?name=Deploy" | grep "Olá, Deploy!"
           if [ -n "${SERVER_PID:-}" ]; then kill $SERVER_PID || true; fi
